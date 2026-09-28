@@ -1,0 +1,20 @@
+# pspxmbsort config
+#
+# Category order = order of the [sections]. [Name] matches the CAT_Name
+# folders in ISO/ and PSP/GAME/ (case-insensitive), merged into one.
+#
+# Inside a section, list items (file or folder names; .iso/.cso/.zso/.pbp
+# optional) in the order they should appear. Items not listed follow A-Z,
+# or Z-A with the line:  sort = za
+#
+# Lines starting with # are comments.
+
+[PSP]
+
+[PS1]
+
+[MINI]
+
+[Emulators]
+
+[Tools]

@@ -1,0 +1,9 @@
+# PSP build artifacts
+*.o
+*.elf
+*.prx
+source/src/pspxmbsort
+source/src/PARAM.SFO
+source/src/EBOOT.PBP
+source/xmb/PARAM.SFO
+deploy.sh
