@@ -1,4 +1,4 @@
-TARGET = pspxmbsort
+TARGET = xmbsort
 OBJS = main.o config.o sorter.o
 
 INCDIR =
@@ -18,7 +18,7 @@ LIBS = -lpsprtc
 LDFLAGS =
 
 EXTRA_TARGETS = EBOOT.PBP
-PSP_EBOOT_TITLE = PSP XMB Sorter
+PSP_EBOOT_TITLE = xmbsort
 PSP_EBOOT_SFO = ../xmb/PARAM.SFO
 # Optional XMB images: used only if present in xmb/.
 PSP_EBOOT_ICON = $(if $(wildcard ../xmb/icon0.png),../xmb/icon0.png,NULL)

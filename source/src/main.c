@@ -9,7 +9,7 @@
 #include "config.h"
 #include "sorter.h"
 
-PSP_MODULE_INFO("pspxmbsort", PSP_MODULE_USER, 1, 0);
+PSP_MODULE_INFO("xmbsort", PSP_MODULE_USER, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
 
 #define EXIT_DELAY_S	3
@@ -50,7 +50,7 @@ static void get_paths(int argc, char *argv[], char *root, size_t rn,
 
 	if (!colon || !slash) {
 		snprintf(root, rn, "ms0:");
-		snprintf(cfg, cn, "ms0:/PSP/GAME/pspxmbsort/config.txt");
+		snprintf(cfg, cn, "ms0:/PSP/GAME/xmbsort/config.txt");
 		return;
 	}
 	snprintf(root, rn, "%.*s", (int)(colon - self + 1), self);
@@ -83,49 +83,54 @@ static int cmp_cat_name(const void *a, const void *b)
 			  (*(Category *const *)b)->name);
 }
 
+/* On-screen name; the uncategorized one shows as in config.txt. */
+static const char *label(const char *name)
+{
+	return *name ? name : NONE_MARK;
+}
+
 static void run(const Config *cfg, Library *lib)
 {
 	Stamper st;
 	Category **group = xrealloc(NULL, lib->ncats * sizeof(Category *));
-	int i, j, n, ng;
+	int i, n, ng;
 
 	stamper_init(&st);
 
 	for (i = 0; i < cfg->nsecs; i++) {
 		const Section *sec = &cfg->secs[i];
+		Category *c = library_find(lib, sec->name);
 
-		ng = 0;
-		for (j = 0; j < sec->nnames; j++) {
-			Category *c = library_find(lib, sec->names[j]);
-
-			if (!c)
-				continue;
-			if (c->used) {
-				warn("[%s] already used above", c->name);
-				continue;
-			}
-			c->used = 1;
-			group[ng++] = c;
-		}
-		pspDebugScreenPrintf("%-16s", sec->nnames ? sec->names[0] : "?");
-		if (!ng) {
+		pspDebugScreenPrintf("%-16s", label(sec->name));
+		if (!c) {
 			pspDebugScreenPrintf("\n");
 			warn("no CAT_ folder");
 			continue;
 		}
-		n = sort_group(&st, group, ng, sec->items, sec->nitems, sec->za);
+		if (c->used) {
+			pspDebugScreenPrintf("\n");
+			warn("%s: already used above", label(c->name));
+			continue;
+		}
+		c->used = 1;
+		n = sort_group(&st, c, sec->items, sec->nitems);
 		pspDebugScreenPrintf("%3d items\n", n);
 	}
 
 	/* Categories missing from config go last, A-Z. */
 	ng = 0;
-	for (i = 0; i < lib->ncats; i++)
-		if (!lib->cats[i].used)
-			group[ng++] = &lib->cats[i];
+	for (i = 0; i < lib->ncats; i++) {
+		Category *c = &lib->cats[i];
+
+		/* Nothing uncategorized: nothing to report. */
+		if (c->used || (!c->nitems && !strcmp(c->name, NONE_NAME)))
+			continue;
+		group[ng++] = c;
+	}
 	qsort(group, ng, sizeof(Category *), cmp_cat_name);
 	for (i = 0; i < ng; i++) {
-		pspDebugScreenPrintf("%-16s", group[i]->name);
-		n = sort_group(&st, &group[i], 1, NULL, 0, 0);
+		pspDebugScreenPrintf("%-16s", label(group[i]->name));
+		n = sort_group(&st, group[i], NULL, 0);
 		pspDebugScreenPrintf("%3d items\n", n);
 		warn("not in config.txt");
 	}
@@ -143,16 +148,16 @@ int main(int argc, char *argv[])
 
 	setup_callbacks();
 	pspDebugScreenInit();
-	pspDebugScreenPrintf("pspxmbsort\n\n");
+	pspDebugScreenPrintf("xmbsort\n\n");
 
 	get_paths(argc, argv, root, sizeof(root), cfgpath, sizeof(cfgpath));
 	library_scan(&lib, root);
 
 	if (config_load(&cfg, cfgpath) < 0) {
-		library_sort_current(&lib);
+		library_sort_name(&lib);
 		if (config_generate(cfgpath, &lib) == 0)
 			pspDebugScreenPrintf("config.txt not found; generated\n%s\n"
-					     "from current order. Edit it and run again.\n",
+					     "Edit it and run again.\n",
 					     cfgpath);
 		else
 			warn("cannot write %s", cfgpath);

@@ -1,4 +1,4 @@
-# Build pspxmbsort inside the pspdev Docker toolchain.
+# Build xmbsort inside the pspdev Docker toolchain.
 #
 #   make            build PARAM.SFO and EBOOT.PBP
 #   make eboot      build only EBOOT.PBP
@@ -40,6 +40,3 @@ shell:
 
 pull:
 	$(DOCKER) pull --platform $(PLATFORM) $(IMAGE)
-
-deploy:
-	./deploy.sh

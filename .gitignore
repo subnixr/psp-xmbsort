@@ -2,7 +2,7 @@
 *.o
 *.elf
 *.prx
-source/src/pspxmbsort
+source/src/xmbsort
 source/src/PARAM.SFO
 source/src/EBOOT.PBP
 source/xmb/PARAM.SFO

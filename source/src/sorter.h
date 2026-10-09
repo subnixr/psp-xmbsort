@@ -13,8 +13,13 @@ typedef struct {
 	int used;
 } Item;
 
+/* Pseudo-category of everything outside the CAT_ folders: *: in config. */
+#define NONE_NAME	""
+#define NONE_MARK	"*"
+
 /* A category: every CAT_<name> folder under ISO/ and PSP/GAME/,
- * matched case-insensitively and merged into one. */
+ * matched case-insensitively and merged into one. NONE_NAME has no
+ * dirs and holds the loose entries of ISO/ and PSP/GAME/. */
 typedef struct {
 	char *name;
 	char **dirs;
@@ -47,14 +52,13 @@ void make_key(char *dst, size_t n, const char *name);
 void library_scan(Library *lib, const char *root);
 void library_free(Library *lib);
 Category *library_find(Library *lib, const char *name);
-/* Sort categories and their items by current XMB order (newest first). */
-void library_sort_current(Library *lib);
+/* Sort categories A-Z, NONE_NAME last. */
+void library_sort_name(Library *lib);
 
 void stamper_init(Stamper *s);
 
-/* Stamp the merged items of cats: listed ones first in the given order,
- * the rest A-Z (Z-A if za), then the CAT_ dirs. Returns item count. */
-int sort_group(Stamper *s, Category **cats, int ncats,
-	       char **listed, int nlisted, int za);
+/* Stamp the items of c: listed ones first in the given order,
+ * the rest A-Z, then the CAT_ dirs. Returns item count. */
+int sort_group(Stamper *s, Category *c, char **listed, int nlisted);
 
 #endif

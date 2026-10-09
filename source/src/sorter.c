@@ -82,10 +82,25 @@ static u64 dt_tick(const ScePspDateTime *dt)
 	return t;
 }
 
+static void add_item(Category *c, const char *dir, const SceIoDirent *d)
+{
+	char path[512], key[256];
+	Item *it;
+
+	snprintf(path, sizeof(path), "%s/%s", dir, d->d_name);
+	make_key(key, sizeof(key), d->d_name);
+	c->items = xrealloc(c->items, (c->nitems + 1) * sizeof(*it));
+	it = &c->items[c->nitems++];
+	it->path = xstrdup(path);
+	it->name = xstrdup(d->d_name);
+	it->key = xstrdup(key);
+	it->tick = dt_tick(&d->d_stat.sce_st_mtime);
+	it->used = 0;
+}
+
 static void scan_cat_dir(Category *c, const char *dir)
 {
 	SceIoDirent d;
-	char path[512], key[256];
 	int fd = sceIoDopen(dir);
 
 	if (fd < 0) {
@@ -93,23 +108,12 @@ static void scan_cat_dir(Category *c, const char *dir)
 		return;
 	}
 	for (;;) {
-		Item *it;
-
 		memset(&d, 0, sizeof(d));
 		if (sceIoDread(fd, &d) <= 0)
 			break;
 		if (!strcmp(d.d_name, ".") || !strcmp(d.d_name, ".."))
 			continue;
-
-		snprintf(path, sizeof(path), "%s/%s", dir, d.d_name);
-		make_key(key, sizeof(key), d.d_name);
-		c->items = xrealloc(c->items, (c->nitems + 1) * sizeof(*it));
-		it = &c->items[c->nitems++];
-		it->path = xstrdup(path);
-		it->name = xstrdup(d.d_name);
-		it->key = xstrdup(key);
-		it->tick = dt_tick(&d.d_stat.sce_st_mtime);
-		it->used = 0;
+		add_item(c, dir, &d);
 	}
 	sceIoDclose(fd);
 }
@@ -130,8 +134,11 @@ void library_scan(Library *lib, const char *root)
 	char base[256], dir[512];
 	size_t b;
 
-	lib->cats = NULL;
-	lib->ncats = 0;
+	/* cats[0] collects whatever is not inside a CAT_ folder. */
+	lib->cats = xrealloc(NULL, sizeof(*lib->cats));
+	lib->ncats = 1;
+	memset(lib->cats, 0, sizeof(*lib->cats));
+	lib->cats[0].name = xstrdup(NONE_NAME);
 
 	for (b = 0; b < sizeof(bases) / sizeof(bases[0]); b++) {
 		int fd;
@@ -147,9 +154,13 @@ void library_scan(Library *lib, const char *root)
 			memset(&d, 0, sizeof(d));
 			if (sceIoDread(fd, &d) <= 0)
 				break;
-			if (!FIO_S_ISDIR(d.d_stat.st_mode) ||
-			    strncasecmp(d.d_name, "CAT_", 4) || !d.d_name[4])
+			if (!strcmp(d.d_name, ".") || !strcmp(d.d_name, ".."))
 				continue;
+			if (!FIO_S_ISDIR(d.d_stat.st_mode) ||
+			    strncasecmp(d.d_name, "CAT_", 4) || !d.d_name[4]) {
+				add_item(&lib->cats[0], base, &d);
+				continue;
+			}
 
 			/* Same CAT_ name under ISO/ and PSP/GAME/ = one category. */
 			c = library_find(lib, d.d_name + 4);
@@ -194,32 +205,18 @@ void library_free(Library *lib)
 	lib->ncats = 0;
 }
 
-static int cmp_item_current(const void *a, const void *b)
-{
-	const Item *x = a, *y = b;
-
-	if (x->tick != y->tick)
-		return x->tick > y->tick ? -1 : 1;
-	return strcmp(x->key, y->key);
-}
-
-static int cmp_cat_current(const void *a, const void *b)
+static int cmp_cat_name(const void *a, const void *b)
 {
 	const Category *x = a, *y = b;
 
-	if (x->tick != y->tick)
-		return x->tick > y->tick ? -1 : 1;
+	if (!*x->name != !*y->name)
+		return !*x->name ? 1 : -1;
 	return strcasecmp(x->name, y->name);
 }
 
-void library_sort_current(Library *lib)
+void library_sort_name(Library *lib)
 {
-	int i;
-
-	qsort(lib->cats, lib->ncats, sizeof(Category), cmp_cat_current);
-	for (i = 0; i < lib->ncats; i++)
-		qsort(lib->cats[i].items, lib->cats[i].nitems, sizeof(Item),
-		      cmp_item_current);
+	qsort(lib->cats, lib->ncats, sizeof(Category), cmp_cat_name);
 }
 
 void stamper_init(Stamper *s)
@@ -258,41 +255,28 @@ static int cmp_az(const void *a, const void *b)
 	return strcmp((*(Item *const *)a)->key, (*(Item *const *)b)->key);
 }
 
-static int cmp_za(const void *a, const void *b)
+int sort_group(Stamper *s, Category *c, char **listed, int nlisted)
 {
-	return -cmp_az(a, b);
-}
-
-int sort_group(Stamper *s, Category **cats, int ncats,
-	       char **listed, int nlisted, int za)
-{
-	Item **order;
+	Item **order = xrealloc(NULL, c->nitems * sizeof(Item *));
 	char key[256];
-	int i, j, n = 0, nord = 0;
+	int i, j, nord = 0;
 
-	for (i = 0; i < ncats; i++)
-		n += cats[i]->nitems;
-	order = xrealloc(NULL, n * sizeof(Item *));
-
-	for (i = 0; i < ncats; i++)
-		for (j = 0; j < cats[i]->nitems; j++)
-			cats[i]->items[j].used = 0;
+	for (j = 0; j < c->nitems; j++)
+		c->items[j].used = 0;
 
 	/* Listed items first, in config order. */
 	for (i = 0; i < nlisted; i++) {
 		Item *found = NULL;
-		int c;
 
 		make_key(key, sizeof(key), listed[i]);
-		for (c = 0; c < ncats && !found; c++)
-			for (j = 0; j < cats[c]->nitems; j++) {
-				Item *it = &cats[c]->items[j];
+		for (j = 0; j < c->nitems; j++) {
+			Item *it = &c->items[j];
 
-				if (!it->used && !strcmp(it->key, key)) {
-					found = it;
-					break;
-				}
+			if (!it->used && !strcmp(it->key, key)) {
+				found = it;
+				break;
 			}
+		}
 		if (!found) {
 			warn("not found: %s", listed[i]);
 			continue;
@@ -303,20 +287,15 @@ int sort_group(Stamper *s, Category **cats, int ncats,
 
 	/* Then the rest, alphabetically. */
 	j = nord;
-	for (i = 0; i < ncats; i++) {
-		int k;
-
-		for (k = 0; k < cats[i]->nitems; k++)
-			if (!cats[i]->items[k].used)
-				order[nord++] = &cats[i]->items[k];
-	}
-	qsort(order + j, nord - j, sizeof(Item *), za ? cmp_za : cmp_az);
+	for (i = 0; i < c->nitems; i++)
+		if (!c->items[i].used)
+			order[nord++] = &c->items[i];
+	qsort(order + j, nord - j, sizeof(Item *), cmp_az);
 
 	for (i = 0; i < nord; i++)
 		stamp(s, order[i]->path);
-	for (i = 0; i < ncats; i++)
-		for (j = 0; j < cats[i]->ndirs; j++)
-			stamp(s, cats[i]->dirs[j]);
+	for (i = 0; i < c->ndirs; i++)
+		stamp(s, c->dirs[i]);
 
 	free(order);
 	return nord;

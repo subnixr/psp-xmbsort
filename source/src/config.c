@@ -6,17 +6,9 @@
 #include "config.h"
 
 static const char header[] =
-	"# pspxmbsort config\n"
-	"#\n"
-	"# Category order = order of the [sections]. [Name] matches the CAT_Name\n"
-	"# folders in ISO/ and PSP/GAME/ (case-insensitive), merged into one.\n"
-	"# Several names can form one category:  [MINI, MINIS]\n"
-	"#\n"
-	"# Inside a section, list items (file or folder names; .iso/.cso/.zso/.pbp\n"
-	"# optional) in the order they should appear. Items not listed follow A-Z,\n"
-	"# or Z-A with the line:  sort = za\n"
-	"#\n"
-	"# Lines starting with # are comments.\n";
+	"# Name: = CAT_Name folders, *: = uncategorized.\n"
+	"# List games under category in desired order.\n"
+	"# Unlisted items go A-Z.\n";
 
 static char *trim(char *s)
 {
@@ -36,26 +28,6 @@ static void push(char ***list, int *n, const char *s)
 	(*list)[(*n)++] = xstrdup(s);
 }
 
-/* "sort = az|za" directive; returns 1 if line was one. */
-static int parse_sort(Section *sec, char *s, int lineno)
-{
-	char *p;
-
-	if (strncasecmp(s, "sort", 4))
-		return 0;
-	p = trim(s + 4);
-	if (*p != '=')
-		return 0;
-	p = trim(p + 1);
-	if (!strcasecmp(p, "za"))
-		sec->za = 1;
-	else if (!strcasecmp(p, "az"))
-		sec->za = 0;
-	else
-		warn("line %d: sort must be az or za", lineno);
-	return 1;
-}
-
 int config_load(Config *cfg, const char *path)
 {
 	FILE *f = fopen(path, "r");
@@ -70,6 +42,7 @@ int config_load(Config *cfg, const char *path)
 
 	while (fgets(line, sizeof(line), f)) {
 		char *s = line;
+		size_t len;
 
 		/* UTF-8 BOM from Windows editors. */
 		if (++lineno == 1 && !strncmp(s, "\xEF\xBB\xBF", 3))
@@ -78,35 +51,31 @@ int config_load(Config *cfg, const char *path)
 		if (!*s || *s == '#')
 			continue;
 
-		if (*s == '[') {
-			char *e = strchr(s, ']'), *tok;
-
-			if (!e) {
-				warn("line %d: missing ]", lineno);
+		/* No file name has a colon. */
+		len = strlen(s);
+		if (s[len - 1] == ':') {
+			s[len - 1] = '\0';
+			s = trim(s);
+			if (!*s) {
+				warn("line %d: missing category name", lineno);
+				cur = NULL;
 				continue;
 			}
-			*e = '\0';
+			if (!strcmp(s, NONE_MARK))
+				*s = '\0';
+			else if (!strncasecmp(s, "CAT_", 4))
+				s += 4;
 			cfg->secs = xrealloc(cfg->secs, (cfg->nsecs + 1) * sizeof(Section));
 			cur = &cfg->secs[cfg->nsecs++];
 			memset(cur, 0, sizeof(*cur));
-			for (tok = strtok(s + 1, ","); tok; tok = strtok(NULL, ",")) {
-				tok = trim(tok);
-				if (!strncasecmp(tok, "CAT_", 4))
-					tok += 4;
-				if (*tok)
-					push(&cur->names, &cur->nnames, tok);
-			}
-			if (!cur->nnames)
-				warn("line %d: empty section name", lineno);
+			cur->name = xstrdup(s);
 			continue;
 		}
 
 		if (!cur) {
-			warn("line %d: item outside [section]", lineno);
+			warn("line %d: item before any category", lineno);
 			continue;
 		}
-		if (parse_sort(cur, s, lineno))
-			continue;
 		push(&cur->items, &cur->nitems, s);
 	}
 	fclose(f);
@@ -120,11 +89,9 @@ void config_free(Config *cfg)
 	for (i = 0; i < cfg->nsecs; i++) {
 		Section *sec = &cfg->secs[i];
 
-		for (j = 0; j < sec->nnames; j++)
-			free(sec->names[j]);
 		for (j = 0; j < sec->nitems; j++)
 			free(sec->items[j]);
-		free(sec->names);
+		free(sec->name);
 		free(sec->items);
 	}
 	free(cfg->secs);
@@ -135,17 +102,15 @@ void config_free(Config *cfg)
 int config_generate(const char *path, const Library *lib)
 {
 	FILE *f = fopen(path, "w");
-	int i, j;
+	int i;
 
 	if (!f)
 		return -1;
 	fputs(header, f);
 	for (i = 0; i < lib->ncats; i++) {
-		const Category *c = &lib->cats[i];
+		const char *name = lib->cats[i].name;
 
-		fprintf(f, "\n[%s]\n", c->name);
-		for (j = 0; j < c->nitems; j++)
-			fprintf(f, "%s\n", c->items[j].name);
+		fprintf(f, "\n%s:\n", *name ? name : NONE_MARK);
 	}
 	return fclose(f) ? -1 : 0;
 }
